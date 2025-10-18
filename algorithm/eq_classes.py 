@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""
+Computes abstraction classes for properties of binary relations.
+
+Usage:
+    python eq_classes.py          # prints in a human-readable format
+    python eq_classes.py --csv    # prints CSV to stdout
+"""
+
+from itertools import combinations
+import argparse
+import csv
+import sys
+
+# ---------- Set of all properties ----------
+
+PROPERTIES = {
+    "REF", "SYM", "TRA", "IRF", "ANS",
+    "ASM", "ACC", "ITR", "ANT"
+}
+
+# ---------- Generating subsets ----------
+
+def generate_all_subsets(elements):
+    """Returns a list of all subsets of the given set."""
+    return [set(c) for r in range(len(elements) + 1)
+            for c in combinations(elements, r)]
+
+# ---------- Contradictions ----------
+
+def is_contradictory(S):
+    """Checks whether a subset of properties contradicts the axioms."""
+    # 1  REF ∧ IRF
+    if "REF" in S and "IRF" in S:
+        return True
+    # 2  SYM ∧ ASM
+    if "SYM" in S and "ASM" in S:
+        return True
+    # 3  TRA ∧ ITR
+    if "TRA" in S and "ITR" in S:
+        return True
+    # 4  SYM ∧ ANS ∧ ¬REF
+    if "SYM" in S and "ANS" in S and "REF" not in S:
+        return True
+    # 5  REF ∧ ASM
+    if "REF" in S and "ASM" in S:
+        return True
+    # 6  REF ∧ ANT
+    if "REF" in S and "ANT" in S:
+        return True
+    # 7  REF ∧ ACC
+    if "REF" in S and "ACC" in S:
+        return True
+    # 8  SYM ∧ ACC
+    if "SYM" in S and "ACC" in S:
+        return True
+    return False
+
+# ---------- Implications ----------
+
+def closure_with_implications(S):
+    """
+    Computes the implicational closure of a set of properties.
+    If a contradiction appears during closure, returns None.
+    """
+    S = set(S)
+    changed = True
+    while changed:
+        changed = False
+        before = S.copy()
+
+        # 1  ASM ⇒ ANS, IRF
+        if "ASM" in S:
+            S.update({"ANS", "IRF"})
+        # 2  ANT ⇒ IRF
+        if "ANT" in S:
+            S.add("IRF")
+        # 3  ACC ⇒ ANS, IRF
+        if "ACC" in S:
+            S.update({"ANS", "IRF"})
+        # 4  ASM ∧ TRA ⇒ ACC
+        if "ASM" in S and "TRA" in S:
+            S.add("ACC")
+        # 5  TRA ∧ IRF ⇒ ASM, ACC, ANS
+        if "TRA" in S and "IRF" in S:
+            S.update({"ASM", "ACC", "ANS"})
+        # 6  SYM ∧ TRA ⇒ REF
+        if "SYM" in S and "TRA" in S:
+            S.add("REF")
+        # 7  ACC ⇒ ASM
+        if "ACC" in S:
+            S.add("ASM")
+        # 8  IRF ∧ ANS ⇒ ASM
+        if "IRF" in S and "ANS" in S:
+            S.add("ASM")
+
+        if S != before:
+            changed = True
+            if is_contradictory(S):
+                return None
+    return S
+
+def apply_rules(subset):
+    """Returns the implicational closure or None if contradictory."""
+    if is_contradictory(subset):
+        return None
+    return closure_with_implications(subset)
+
+# ---------- Indistinguishability ----------
+
+def indistinguishable(s1, s2, candidates):
+    """
+    Two sets are indistinguishable if, when merged with any valid test set,
+    they produce identical closures.
+    """
+    for test in candidates:
+        if apply_rules(s1 | test) != apply_rules(s2 | test):
+            return False
+    return True
+
+# ---------- Abstraction classes ----------
+
+def abstraction_classes():
+    """
+    Returns a sorted list of abstraction classes (for valid sets)
+    and one additional class containing all contradictions.
+    """
+    all_subsets = generate_all_subsets(PROPERTIES)
+
+    valid          = [s for s in all_subsets if apply_rules(s) is not None]
+    contradictions = [s for s in all_subsets if apply_rules(s) is None]
+
+    classes, seen = [], set()
+    for s in valid:
+        fs = frozenset(s)
+        if fs in seen:
+            continue
+        current = [s]
+        seen.add(fs)
+        for t in valid:
+            ft = frozenset(t)
+            if ft not in seen and indistinguishable(s, t, valid):
+                current.append(t)
+                seen.add(ft)
+        current.sort(key=lambda x: (len(x), sorted(x)))
+        classes.append(current)
+
+    # the contradictions class
+    if contradictions:
+        classes.append(contradictions)
+
+    # class ordering
+    classes.sort(key=lambda c: (len(c[0]), sorted(c[0])))
+    return classes
+
+# ---------- Formatting ----------
+
+def format_set(S):
+    return "Ø" if not S else "{" + ", ".join(sorted(S)) + "}"
+
+# ---------- Main routine ----------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Computes abstraction classes for properties of binary relations."
+    )
+    parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="write the result in CSV format to stdout"
+    )
+    args = parser.parse_args()
+
+    classes = abstraction_classes()
+
+    if args.csv:
+        writer = csv.writer(sys.stdout)
+        for idx, cls in enumerate(classes, 1):
+            row = [idx] + [format_set(s) for s in cls]
+            writer.writerow(row)
+        writer.writerow(["count", len(classes)])
+    else:
+        for idx, cls in enumerate(classes, 1):
+            print(f"{idx}: " + ", ".join(format_set(s) for s in cls))
+        print(len(classes))
+
+if __name__ == "__main__":
+    main()
+
